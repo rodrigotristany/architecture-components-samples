@@ -1,19 +1,17 @@
 /*
+ * Copyright 2018 The Android Open Source Project
  *
- *  * Copyright (C) 2018 The Android Open Source Project
- *  *
- *  * Licensed under the Apache License, Version 2.0 (the "License");
- *  * you may not use this file except in compliance with the License.
- *  * You may obtain a copy of the License at
- *  *
- *  *      http://www.apache.org/licenses/LICENSE-2.0
- *  *
- *  * Unless required by applicable law or agreed to in writing, software
- *  * distributed under the License is distributed on an "AS IS" BASIS,
- *  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  * See the License for the specific language governing permissions and
- *  * limitations under the License.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package com.example.background
@@ -22,111 +20,90 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.text.TextUtils
 import android.view.View
-import android.widget.Button
-import android.widget.Checkable
-import android.widget.ImageView
-import android.widget.ProgressBar
 import androidx.activity.viewModels
-import androidx.annotation.IdRes
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.Observer
+import androidx.work.WorkInfo
 import com.bumptech.glide.Glide
+import com.example.background.databinding.ActivityFilterBinding
 
-/**
- * The [android.app.Activity] where the user picks filters to be applied on an
- * image.
- */
+/** The [android.app.Activity] where the user picks filters to be applied on an image. */
 class FilterActivity : AppCompatActivity() {
 
-    private val mViewModel: FilterViewModel by viewModels()
-    private var mImageUri: Uri? = null
-    private var mOutputImageUri: Uri? = null
+    private val viewModel: FilterViewModel by viewModels { FilterViewModelFactory(application) }
+    private var outputImageUri: Uri? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_processing)
 
-        // Don't enable upload to Imgur, unless the developer specifies their own clientId.
-        val enableUpload = !TextUtils.isEmpty(Constants.IMGUR_CLIENT_ID)
-        findViewById<View>(R.id.upload).isEnabled = enableUpload
-
-        val intent = intent
-        val imageUriExtra = intent.getStringExtra(Constants.KEY_IMAGE_URI)
-        if (!TextUtils.isEmpty(imageUriExtra)) {
-            mImageUri = Uri.parse(imageUriExtra)
-            val imageView = findViewById<ImageView>(R.id.imageView)
-            Glide.with(this).load(mImageUri).into(imageView)
+        ActivityFilterBinding.inflate(layoutInflater).run {
+            setContentView(root)
+            bindViews(this)
+            // Check to see if we have output.
+            viewModel.workInfo.observe(this@FilterActivity) { info ->
+                onStateChange(info, this)
+            }
         }
+    }
 
-        findViewById<View>(R.id.go).setOnClickListener {
-            val applyWaterColor = isChecked(R.id.filter_watercolor)
-            val applyGrayScale = isChecked(R.id.filter_grayscale)
-            val applyBlur = isChecked(R.id.filter_blur)
-            val save = isChecked(R.id.save)
-            val upload = isChecked(R.id.upload)
+    private fun bindViews(binding: ActivityFilterBinding) {
+        with(binding) {
+            val imageUri: Uri = Uri.parse(intent.getStringExtra(Constants.KEY_IMAGE_URI))
+            Glide.with(this@FilterActivity).load(imageUri).into(imageView)
 
-            val imageOperations = ImageOperations.Builder(applicationContext, mImageUri!!)
-                    .setApplyWaterColor(applyWaterColor)
-                    .setApplyGrayScale(applyGrayScale)
-                    .setApplyBlur(applyBlur)
-                    .setApplySave(save)
-                    .setApplyUpload(upload)
-                    .build()
+            // Only show output options if a Imgur client id is set.
+            val multipleDestinationsPossible = Constants.IMGUR_CLIENT_ID.isNotEmpty()
+            if (!multipleDestinationsPossible) {
+                destinationsGroup.visibility = View.GONE
+            }
 
-            mViewModel.apply(imageOperations)
-        }
+            apply.setOnClickListener {
+                val applyWaterColor = filterWatercolor.isChecked
+                val applyGrayScale = filterGrayscale.isChecked
+                val applyBlur = filterBlur.isChecked
+                val save = save.isChecked
 
-        findViewById<View>(R.id.output).setOnClickListener {
-            if (mOutputImageUri != null) {
-                val actionView = Intent(Intent.ACTION_VIEW, mOutputImageUri)
-                if (actionView.resolveActivity(packageManager) != null) {
-                    startActivity(actionView)
+                val imageOperations = ImageOperations(
+                    applicationContext, imageUri,
+                    applyWaterColor, applyGrayScale, applyBlur,
+                    save
+                )
+
+                viewModel.apply(imageOperations)
+            }
+
+            output.setOnClickListener {
+                if (outputImageUri != null) {
+                    val viewOutput = Intent(Intent.ACTION_VIEW, outputImageUri)
+                    if (viewOutput.resolveActivity(packageManager) != null) {
+                        startActivity(viewOutput)
+                    }
                 }
             }
+            cancel.setOnClickListener { viewModel.cancel() }
         }
+    }
 
-        findViewById<View>(R.id.cancel).setOnClickListener { mViewModel.cancel() }
+    private fun onStateChange(info: WorkInfo, binding: ActivityFilterBinding) {
+        val finished = info.state.isFinished
 
-        // Check to see if we have output.
-        mViewModel.outputStatus.observe(this, Observer { listOfInfos ->
-            if (listOfInfos == null || listOfInfos.isEmpty()) {
-                return@Observer
-            }
-
-            // We only care about the one output status.
-            // Every continuation has only one worker tagged TAG_OUTPUT
-            val info = listOfInfos[0]
-            val finished = info.state.isFinished
-            val progressBar = findViewById<ProgressBar>(R.id.progressBar)
-            val go = findViewById<Button>(R.id.go)
-            val cancel = findViewById<Button>(R.id.cancel)
-            val output = findViewById<Button>(R.id.output)
+        with(binding) {
             if (!finished) {
                 progressBar.visibility = View.VISIBLE
                 cancel.visibility = View.VISIBLE
-                go.visibility = View.GONE
+                apply.visibility = View.GONE
                 output.visibility = View.GONE
             } else {
                 progressBar.visibility = View.GONE
                 cancel.visibility = View.GONE
-                go.visibility = View.VISIBLE
-
-                val outputData = info.outputData
-                val outputImageUri = outputData.getString(Constants.KEY_IMAGE_URI)
-
-                if (!TextUtils.isEmpty(outputImageUri)) {
-                    mOutputImageUri = Uri.parse(outputImageUri)
-                    output.visibility = View.VISIBLE
-                }
+                apply.visibility = View.VISIBLE
             }
-        })
-    }
-
-    private fun isChecked(@IdRes resourceId: Int): Boolean {
-        val view = findViewById<View>(resourceId)
-        return view is Checkable && (view as Checkable).isChecked
+        }
+        val outputData = info.outputData
+        outputData.getString(Constants.KEY_IMAGE_URI)?.let {
+            outputImageUri = Uri.parse(it)
+            binding.output.visibility = View.VISIBLE
+        }
     }
 
     companion object {
@@ -134,14 +111,13 @@ class FilterActivity : AppCompatActivity() {
         /**
          * Creates a new intent which can be used to start [FilterActivity].
          *
-         * @param context  the application [Context].
+         * @param context the application [Context].
          * @param imageUri the input image [Uri].
          * @return the instance of [Intent].
          */
-        internal fun newIntent(context: Context, imageUri: Uri): Intent {
-            val intent = Intent(context, FilterActivity::class.java)
-            intent.putExtra(Constants.KEY_IMAGE_URI, imageUri.toString())
-            return intent
-        }
+        internal fun newIntent(context: Context, imageUri: Uri) =
+            Intent(context, FilterActivity::class.java).putExtra(
+                Constants.KEY_IMAGE_URI, imageUri.toString()
+            )
     }
 }

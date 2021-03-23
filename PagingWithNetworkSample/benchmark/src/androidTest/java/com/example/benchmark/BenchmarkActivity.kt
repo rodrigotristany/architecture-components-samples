@@ -16,57 +16,65 @@
 package com.example.benchmark
 
 import android.os.Bundle
+import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
-import androidx.paging.PageKeyedDataSource
-import androidx.paging.PagedList
+import androidx.lifecycle.lifecycleScope
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingSource
+import androidx.paging.PagingState
 import com.android.example.paging.pagingwithnetwork.GlideApp
-import com.android.example.paging.pagingwithnetwork.reddit.repository.NetworkState
 import com.android.example.paging.pagingwithnetwork.reddit.ui.PostsAdapter
 import com.android.example.paging.pagingwithnetwork.reddit.vo.RedditPost
-import kotlinx.android.synthetic.main.activity_benchmark.*
+import com.example.benchmark.databinding.ActivityBenchmarkBinding
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 class BenchmarkActivity : AppCompatActivity() {
     val testExecutor = TestExecutor()
+    @VisibleForTesting
+    lateinit var binding: ActivityBenchmarkBinding
+        private set
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_benchmark)
+        binding = ActivityBenchmarkBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
         val glide = GlideApp.with(this)
-        val adapter = PostsAdapter(glide) {}
-        list.adapter = adapter
+        val adapter = PostsAdapter(glide)
+        binding.list.adapter = adapter
 
-        val config = PagedList.Config.Builder()
-                .setInitialLoadSizeHint(5)
-                .setPageSize(5)
-                .build()
+        val config = PagingConfig(
+            pageSize = 5,
+            initialLoadSize = 5
+        )
 
-        val pagedStrings: PagedList<RedditPost> = PagedList.Builder<Int, RedditPost>(MockDataSource(), config)
-                .setInitialKey(0)
-                .setFetchExecutor(testExecutor)
-                .setNotifyExecutor(testExecutor)
-                .build()
+        val pager = Pager(config, 0) {
+            MockPagingSource()
+        }
 
-        adapter.submitList(pagedStrings)
-        adapter.setNetworkState(NetworkState.LOADED)
+        lifecycleScope.launch {
+            @OptIn(ExperimentalCoroutinesApi::class)
+            pager.flow.collectLatest {
+                adapter.submitData(it)
+            }
+        }
     }
 }
 
-class MockDataSource : PageKeyedDataSource<Int, RedditPost>() {
-    override fun loadInitial(params: LoadInitialParams<Int>, callback: LoadInitialCallback<Int, RedditPost>) {
-        callback.onResult(List(200) { generatePost() }.toList(), -1, 1)
-    }
-
-    override fun loadAfter(params: LoadParams<Int>, callback: LoadCallback<Int, RedditPost>) {
-        callback.onResult(List(200) { generatePost() }.toList(), params.key + 1)
-    }
-
-    override fun loadBefore(params: LoadParams<Int>, callback: LoadCallback<Int, RedditPost>) {
-        callback.onResult(List(200) { generatePost() }.toList(), params.key - 1)
-    }
-
+class MockPagingSource : PagingSource<Int, RedditPost>() {
     private fun generatePost(): RedditPost {
         val title = List(10) { (0..100).random() }.joinToString("")
         return RedditPost("name", title, 1, "author", "androiddev", 0, System.currentTimeMillis(), null, null)
     }
+
+    override suspend fun load(params: LoadParams<Int>): LoadResult<Int, RedditPost> {
+        val key = params.key ?: 0
+        return LoadResult.Page(List(200) { generatePost() }.toList(), key - 1, key + 1)
+    }
+
+    // Unused in benchmark.
+    override fun getRefreshKey(state: PagingState<Int, RedditPost>): Int? = null
 }

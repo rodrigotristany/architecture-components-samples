@@ -15,7 +15,6 @@
  */
 
 apply plugin: 'com.android.application'
-apply plugin: 'jacoco'
 apply plugin: 'kotlin-android'
 apply plugin: 'kotlin-kapt'
 
@@ -38,9 +37,9 @@ android {
         testInstrumentationRunner "com.android.example.github.util.GithubTestRunner"
     }
     buildTypes {
-        debug {
-            testCoverageEnabled !project.hasProperty('android.injected.invoked.from.ide')
-        }
+          debug {
+              testCoverageEnabled !project.hasProperty('android.injected.invoked.from.ide')
+          }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
@@ -63,10 +62,6 @@ android {
     lintOptions {
         lintConfig rootProject.file('lint.xml')
     }
-}
-
-jacoco {
-    toolVersion = "0.7.4+"
 }
 
 dependencies {
@@ -122,34 +117,7 @@ dependencies {
     androidTestImplementation deps.mockito.android
 }
 
-task fullCoverageReport(type: JacocoReport) {
-    dependsOn 'createDebugCoverageReport'
-    dependsOn 'testDebugUnitTest'
-    reports {
-        xml.enabled = true
-        html.enabled = true
-    }
-
-    def fileFilter = ['**/R.class', '**/R$*.class', '**/BuildConfig.*', '**/Manifest*.*',
-                      '**/*Test*.*', 'android/**/*.*',
-                      '**/*_MembersInjector.class',
-                      '**/Dagger*Component.class',
-                      '**/Dagger*Component$Builder.class',
-                      '**/*_*Factory.class',
-                      '**/*ComponentImpl.class',
-                      '**/*SubComponentBuilder.class']
-    def debugTree = fileTree(dir: "${buildDir}/intermediates/classes/debug", excludes: fileFilter)
-    def mainSrc = "${project.projectDir}/src/main/java"
-
-    sourceDirectories = files([mainSrc])
-    classDirectories = files([debugTree])
-    executionData = fileTree(dir: "$buildDir", includes: [
-            "jacoco/testDebugUnitTest.exec",
-            "outputs/code-coverage/connected/*coverage.ec"
-    ])
-}
-
-// we need all open to run tests which  a we enable only for debug builds.
+// we need all open to run tests which we enable only for debug builds.
 project.tasks.whenTaskAdded {
     if (it.name == "testReleaseUnitTest") {
         it.enabled = false
